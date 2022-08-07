@@ -1,0 +1,12 @@
+#compdef git-select-branch
+#description Select a branch and switch to it
+
+local -a args
+args=(
+  '(-q --quiet)'{-q,--quiet}'[Suppress output messages]'
+  '(-p --prompt)'{-p,--prompt=}'[FZF prompt to use]:prompt:()'
+  '--select-only[Print the selected branch, do not actually switch to it]'
+  '-h[Print help message]'
+)
+
+_arguments -s $args

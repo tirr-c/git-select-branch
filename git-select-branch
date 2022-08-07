@@ -1,0 +1,143 @@
+#!/usr/bin/env zsh
+# -*- mode: sh; sh-indentation: 4; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
+
+# Copyright (c) 2022 Wonwoo Choi
+
+# Set the base and typically useful options
+emulate -LR zsh
+setopt extendedglob warncreateglobal typesetsilent noshortloops rcquotes
+
+# Run as script? ZSH_SCRIPT is a Zsh 5.3 addition
+if [[ $0 != git-select-branch || -n $ZSH_SCRIPT ]]; then
+    # Handle $0 according to the Zsh Plugin Standard:
+    # http://zdharma.org/Zsh-100-Commits-Club/Zsh-Plugin-Standard.html
+    0=${${ZERO:-${0:#$ZSH_ARGZERO}}:-${(%):-%N}}
+    0=${${(M)0##/*}:-$PWD/$0}
+
+    # Such global variable is expected to be typeset'd -g in the plugin.zsh
+    # file. Here it's restored in case of the function being run as a script.
+    typeset -gA Plugins
+    Plugins[GIT_SELECT_BRANCH_DIR]=${0:h}
+fi
+
+function .print-help() {
+    print -u2 'usage: git select-branch [<options>]'
+    print -u2 'Select a branch and switch to it'
+    print -u2
+
+    print -u2 '    -p, --prompt <prompt>'
+    print -u2 '                          FZF prompt to use'
+    print -u2 '    -q, --quiet           Suppress output messages'
+    print -u2 '    --select-only         Print the selected branch, do not actually switch to it'
+}
+trap 'unset -f .print-help' EXIT
+
+# Detect `git switch`
+local -a lines_list
+local -a switch_subcommand
+lines_list=( ${(M)${(f)"$(git help -a)"}:# ##switch *} )
+if (( ${#lines_list} > 0 )); then
+    switch_subcommand=('switch')
+else
+    switch_subcommand=('checkout')
+fi
+
+# Parse options
+local prompt
+integer quiet=0
+integer select_only=0
+
+local opt
+while getopts ':-:hqp:' opt; do
+    case $opt in
+        -)
+            case $OPTARG in
+                quiet)
+                    quiet=1
+                    ;;
+                prompt)
+                    prompt="${argv[${OPTIND}]}"
+                    OPTIND=$((OPTIND + 1))
+                    ;;
+                prompt=*)
+                    prompt="${OPTARG#prompt=}"
+                    ;;
+                select-only)
+                    select_only=1
+                    ;;
+                *)
+                    (( quiet == 1 )) || print -u2 "Invalid option: $OPTARG"
+                    false; return
+                    ;;
+            esac
+            ;;
+        h)
+            .print-help
+            return
+            ;;
+        q)
+            quiet=1
+            ;;
+        p)
+            prompt=$OPTARG
+            ;;
+        *)
+            (( quiet == 1 )) || print -u2 "Invalid option: $OPTARG"
+            false; return
+            ;;
+    esac
+done
+
+if (( quiet == 1 )); then
+    switch_subcommand+=('-q')
+fi
+prompt=${prompt:-"git $switch_subcommand "}
+
+# Find fzf
+if ! command -v fzf &>/dev/null; then
+    (( quiet == 1 )) || print -u2 'fzf not found' >&2
+    false; return
+fi
+
+# List branches
+local -a branches
+branches=( ${(f)"$(git branch)"} )
+(( $? == 0 )) || return
+branches=( ${${(M)branches:#  *}#  } )
+
+if (( ${#branches[@]} == 0 )); then
+    (( quiet == 1 )) || print -u2 'No branches to select'
+    false; return
+fi
+
+# Run fzf
+local selected
+local branch
+selected=$(
+    for branch in $branches; do
+        local description
+        description="$(
+            git show -s --color=always \
+                --pretty='%C(yellow)%h%Creset %s %C(brightblack)(%ar)%Creset' \
+                "${branch}"
+        )"
+        print "\e[32m${branch}\e[39m: ${description}"
+    done | \
+    fzf --ansi \
+        --delimiter=': ' \
+        --prompt="${prompt}" \
+        --preview="git log --color=always --decorate --oneline --graph {1} | head -n $LINES" \
+        -n1
+)
+
+[[ -n "$selected" ]] || return
+selected="${selected%%: *}"
+
+if (( select_only == 1 )); then
+    print "$selected"
+    return
+fi
+
+git $switch_subcommand $selected
+
+# vim:ft=zsh:tw=80:sw=4:sts=4:et:foldmarker=[[[,]]]
