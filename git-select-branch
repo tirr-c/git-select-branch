@@ -88,6 +88,15 @@ while getopts ':-:hqp:' opt; do
     esac
 done
 
+local -a query
+query=${argv[${OPTIND},-1]}
+local -a fzf_extra_flags
+if (( ${#query[@]} > 0 )); then
+    fzf_extra_flags=('-q' "${query[@]}" '-1')
+else
+    fzf_extra_flags=()
+fi
+
 if (( quiet == 1 )); then
     switch_subcommand+=('-q')
 fi
@@ -127,7 +136,8 @@ selected=$(
         --delimiter=': ' \
         --prompt="${prompt}" \
         --preview="git log --color=always --decorate --oneline --graph {1} | head -n $LINES" \
-        -n1
+        -n1 \
+        $fzf_extra_flags
 )
 
 [[ -n "$selected" ]] || return
